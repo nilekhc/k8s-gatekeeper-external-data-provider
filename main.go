@@ -14,6 +14,8 @@ import (
 	"github.com/open-policy-agent/gatekeeper-external-data-provider/pkg/handler"
 	"github.com/open-policy-agent/gatekeeper-external-data-provider/pkg/utils"
 
+	"k8s.io/client-go/kubernetes"
+	clientgorest "k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 )
 
@@ -40,8 +42,20 @@ func init() {
 }
 
 func main() {
+	// creates the in-cluster config
+	clientgoRestConfig, err := clientgorest.InClusterConfig()
+	if err != nil {
+		panic(err.Error())
+	}
+
+	// creates the clientset
+	clientset, err := kubernetes.NewForConfig(clientgoRestConfig)
+	if err != nil {
+		panic(err.Error())
+	}
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", processTimeout(handler.Handler, timeout))
+	mux.HandleFunc("/", processTimeout(handler.Handler, timeout, clientset))
 
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
@@ -83,7 +97,7 @@ func main() {
 	}
 }
 
-func processTimeout(h http.HandlerFunc, duration time.Duration) http.HandlerFunc {
+func processTimeout(h func(http.ResponseWriter, *http.Request, *kubernetes.Clientset), duration time.Duration, clientset *kubernetes.Clientset) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), duration)
 		defer cancel()
@@ -92,7 +106,7 @@ func processTimeout(h http.HandlerFunc, duration time.Duration) http.HandlerFunc
 
 		processDone := make(chan bool)
 		go func() {
-			h(w, r)
+			h(w, r, clientset)
 			processDone <- true
 		}()
 

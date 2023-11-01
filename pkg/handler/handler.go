@@ -1,18 +1,20 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/open-policy-agent/frameworks/constraint/pkg/externaldata"
 	"github.com/open-policy-agent/gatekeeper-external-data-provider/pkg/utils"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 )
 
-func Handler(w http.ResponseWriter, req *http.Request) {
+func Handler(w http.ResponseWriter, req *http.Request, clientset *kubernetes.Clientset) {
 	// only accept POST requests
 	if req.Method != http.MethodPost {
 		utils.SendResponse(nil, "only POST is allowed", w)
@@ -25,8 +27,9 @@ func Handler(w http.ResponseWriter, req *http.Request) {
 		utils.SendResponse(nil, fmt.Sprintf("unable to read request body: %v", err), w)
 		return
 	}
-
 	klog.InfoS("received request", "body", requestBody)
+
+	ingressHosts := getExistingIngressHosts(clientset)
 
 	// parse request body
 	var providerRequest externaldata.ProviderRequest
@@ -39,28 +42,33 @@ func Handler(w http.ResponseWriter, req *http.Request) {
 	results := make([]externaldata.Item, 0)
 	// iterate over all keys
 	for _, key := range providerRequest.Request.Keys {
-		// Providers should add a caching mechanism to avoid extra calls to external data sources.
-
-		// following checks are for testing purposes only
-		// check if key contains "_systemError" to trigger a system error
-		if strings.HasSuffix(key, "_systemError") {
-			utils.SendResponse(nil, "testing system error", w)
-			return
-		}
-
-		// check if key contains "error_" to trigger an error
-		if strings.HasPrefix(key, "error_") {
-			results = append(results, externaldata.Item{
-				Key:   key,
-				Error: key + "_invalid",
-			})
-		} else if !strings.HasSuffix(key, "_valid") {
-			// valid key will have "_valid" appended as return value
-			results = append(results, externaldata.Item{
-				Key:   key,
-				Value: key + "_valid",
-			})
+		// check if key exists in ingressHosts, error if it does
+		for _, host := range ingressHosts {
+			if key == host {
+				results = append(results, externaldata.Item{
+					Key:   key,
+					Error: "Duplicate Ingress host found " + key + "_invalid",
+				})
+			}
 		}
 	}
+
 	utils.SendResponse(&results, "", w)
+}
+
+func getExistingIngressHosts(clientset *kubernetes.Clientset) []string {
+	// list all the ingress hosts
+	ingresses, err := clientset.NetworkingV1().Ingresses("").List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		panic(err.Error())
+	}
+
+	ingressHosts := make([]string, 0)
+	for _, ingress := range ingresses.Items {
+		for _, rule := range ingress.Spec.Rules {
+			ingressHosts = append(ingressHosts, rule.Host)
+		}
+	}
+
+	return ingressHosts
 }
