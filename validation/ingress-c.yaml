@@ -1,10 +1,10 @@
 apiVersion: constraints.gatekeeper.sh/v1beta1
 kind: K8sExternalDataValidation
 metadata:
-  name: deny-images-with-invalid-suffix
+  name: deny-ingress-with-duplicate-host
 spec:
   enforcementAction: deny
   match:
     kinds:
       - apiGroups: ["*"]
-        kinds: ["Pod"]
+        kinds: ["Ingress"]
