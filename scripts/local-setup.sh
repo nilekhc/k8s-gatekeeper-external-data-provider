@@ -8,7 +8,6 @@ set -o pipefail
 kind delete cluster --name gatekeeper
 kind create cluster --name gatekeeper
 helm install gatekeeper/gatekeeper \
-    --set enableExternalData=true \
     --name-template=gatekeeper \
     --namespace gatekeeper-system \
     --create-namespace --wait --debug
